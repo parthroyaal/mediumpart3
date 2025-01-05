@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradingView Chart with Real-Time Updates</title>
+  <script type="text/javascript" src="/charting_library/charting_library.standalone.js"></script>
+  <style>
+    #tv_chart_container {
+      position: relative;
+      height: 600px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="tv_chart_container"></div>
+
+  <script>
+    const apiRoot = 'http://localhost:5000'; // Flask API base URL
+
+    const Datafeed = {
+      onReady: function(callback) {
+        setTimeout(() => {
+          callback({
+            supported_resolutions: ['1', '5', '15', '30', '60', '240', '1D'],
+            supports_marks: false,
+            supports_timescale_marks: false,
+            supports_time: true
+          });
+        }, 0);
+      },
+
+      getBars: function(symbolInfo, resolution, periodParams, onHistoryCallback, onErrorCallback) {
+        const { from, to } = periodParams;
+        const splitSymbol = symbolInfo.name.split(/[:/]/);
+
+        const url = resolution.includes('D')
+          ? '/data/histoday'
+          : parseInt(resolution) >= 60
+          ? '/data/histohour'
+          : '/data/histominute';
+
+        const qs = {
+          fsym: splitSymbol[1],
+          tsym: splitSymbol[2],
+          toTs: to,
+          limit: 2000
+        };
+
+        const apiUrl = `${apiRoot}${url}?${new URLSearchParams(qs)}`;
+        fetch(apiUrl)
+          .then(response => response.json())
+          .then(data => {
+            if (!data || !data.Data) {
+              onErrorCallback('No data');
+              return;
+            }
+            const bars = data.Data.map(el => ({
+              time: el.time * 1000,
+              low: el.low,
+              high: el.high,
+              open: el.open,
+              close: el.close,
+              volume: el.volumefrom
+            }));
+            onHistoryCallback(bars, { noData: !bars.length });
+          })
+          .catch(err => onErrorCallback(err.message));
+      },
+
+      resolveSymbol: function(symbolName, onSymbolResolvedCallback, onResolveErrorCallback) {
+        setTimeout(() => {
+          onSymbolResolvedCallback({
+            name: symbolName,
+            description: symbolName,
+            type: 'crypto',
+            session: '24x7',
+            timezone: 'Etc/UTC',
+            minmov: 1,
+            pricescale: 100000,
+            has_intraday: true,
+            has_daily: true,
+            supported_resolutions: ['1', '5', '15', '30', '60', '240', '1D']
+          });
+        }, 0);
+      },
+
+      subscribeBars: function(symbolInfo, resolution, onRealtimeCallback, subscriberUID) {
+        const socket = new WebSocket('ws://localhost:5000/realtime');
+        this._socket = socket;
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          const bar = {
+            time: data.time * 1000,
+            low: data.low,
+            high: data.high,
+            open: data.open,
+            close: data.close,
+            volume: data.volumefrom
+          };
+          onRealtimeCallback(bar);
+        };
+
+        socket.onclose = () => console.log('WebSocket closed');
+        socket.onerror = (error) => console.error('WebSocket error:', error);
+      },
+
+      unsubscribeBars: function() {
+        if (this._socket) this._socket.close();
+      }
+    };
+
+    const widgetOptions = {
+      symbol: 'Coinbase:BTC/USD',
+      datafeed: Datafeed,
+      interval: '15',
+      container_id: 'tv_chart_container',
+      library_path: '/charting_library/',
+      locale: 'en',
+      fullscreen: false,
+      autosize: true
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const widget = new TradingView.widget(widgetOptions);
+      widget.onChartReady(() => {
+        console.log('Chart loaded successfully!');
+      });
+    });
+  </script>
+</body>
+</html>
